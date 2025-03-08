@@ -1,12 +1,17 @@
+// src/index.js
 import React from 'react';
-import ReactDOM from 'react-dom';
-import 'tailwindcss/tailwind.css';
+import { createRoot } from 'react-dom/client';
+
 import App from './App';
-import * as serviceWorker from './serviceWorker';
+import CryptoTester from './crypto-tester';
 
-ReactDOM.render(<App />, document.getElementById('root'));
+// React 18のcreateRootメソッドを使用
+const rootElement = document.getElementById('root');
+const root = createRoot(rootElement);
 
-// If you want your app to work offline and load faster, you can change
-// unregister() to register() below. Note this comes with some pitfalls.
-// Learn more about service workers: https://bit.ly/CRA-PWA
-serviceWorker.unregister();
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
