@@ -124,6 +124,7 @@ function CryptoTester() {
         shamirTestState.totalShares,
         shamirTestState.threshold
       );
+      console.log('生成されたシェア:', shares);
       
       setShamirTestState(prev => ({
         ...prev,

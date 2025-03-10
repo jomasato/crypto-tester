@@ -287,116 +287,207 @@ export const decryptWithPrivateKey = async (encryptedHex, privateKeyHex) => {
   }
 };
 
-/**
- * GF(256)上の有限体演算のための補助関数
- */
-/**
- * GF(256)上の有限体演算のための補助関数
- */
-const gf256 = {
-    // 加算と減算（GF(256)ではXOR）
+const GF256 = {
+    // 加算と減算はXOR
     add: (a, b) => a ^ b,
-    sub: (a, b) => a ^ b, // GF(256)では加算と減算は同じ
+    sub: (a, b) => a ^ b,
     
-    // 掛け算
-    mul: (a, b) => {
-      let p = 0;
+    // 乗算（シンプルで信頼性の高い実装）
+    mul: function(a, b) {
+      a = a & 0xff; // 8ビットに制限
+      b = b & 0xff;
+      
+      if (a === 0 || b === 0) return 0;
+      
+      let result = 0;
+      let temp_a = a;
+      
+      // シフトと加算による乗算
       for (let i = 0; i < 8; i++) {
-        if ((b & 1) !== 0) {
-          p ^= a;
+        if (b & 1) {
+          result ^= temp_a; // 現在のaをXOR
         }
-        const highBit = a & 0x80;
-        a = (a << 1) & 0xff;
-        if (highBit !== 0) {
-          a ^= 0x1b; // x^8 + x^4 + x^3 + x + 1
+        
+        // aを2倍（シフト）し、必要ならGF(256)の既約多項式でXOR
+        const highBit = temp_a & 0x80;
+        temp_a = (temp_a << 1) & 0xff;
+        if (highBit) {
+          temp_a ^= 0x1b; // x^8 + x^4 + x^3 + x + 1
         }
-        b >>= 1;
+        
+        b >>= 1; // bを右シフト
       }
-      return p;
+      
+      return result;
     },
     
-    // 割り算（テーブルベースの逆元を使用）
-    div: (a, b) => {
-      if (b === 0) {
-        throw new Error('0で割ることはできません');
-      }
+    // 除算（逆元を使用）
+    div: function(a, b) {
+      a = a & 0xff;
+      b = b & 0xff;
+      
+      if (b === 0) throw new Error('0による除算はできません');
       if (a === 0) return 0;
       
-      // GF(256)の逆元テーブル
-      const inverseTable = [
-        0x00, 0x01, 0x8d, 0xf6, 0xcb, 0x52, 0x7b, 0xd1, 0xe8, 0x4f, 0x29, 0xc0, 0xb0, 0xe1, 0xe5, 0xc7, 
-        0x74, 0xb4, 0xaa, 0x4b, 0x99, 0x2b, 0x60, 0x5f, 0x58, 0x3f, 0xfd, 0xcc, 0xff, 0x40, 0xee, 0xb2, 
-        0x3a, 0x6e, 0x5a, 0xf1, 0x55, 0x4d, 0xa8, 0xc9, 0xc1, 0x0a, 0x98, 0x15, 0x30, 0x44, 0xa2, 0xc2, 
-        0x2c, 0x45, 0x92, 0x6c, 0xf3, 0x39, 0x66, 0x42, 0xf2, 0x35, 0x20, 0x6f, 0x77, 0xbb, 0x59, 0x19, 
-        0x1d, 0xfe, 0x37, 0x67, 0x2d, 0x31, 0xf5, 0x69, 0xa7, 0x64, 0xab, 0x13, 0x54, 0x25, 0xe9, 0x09, 
-        0xed, 0x5c, 0x05, 0xca, 0x4c, 0x24, 0x87, 0xbf, 0x18, 0x3e, 0x22, 0xf0, 0x51, 0xec, 0x61, 0x17, 
-        0x16, 0x5e, 0xaf, 0xd3, 0x49, 0xa6, 0x36, 0x43, 0xf4, 0x47, 0x91, 0xdf, 0x33, 0x93, 0x21, 0x3b, 
-        0x79, 0xb7, 0x97, 0x85, 0x10, 0xb5, 0xba, 0x3c, 0xb6, 0x70, 0xd0, 0x06, 0xa1, 0xfa, 0x81, 0x82, 
-        0x83, 0x7e, 0x7f, 0x80, 0x96, 0x73, 0xbe, 0x56, 0x9b, 0x9e, 0x95, 0xd9, 0xf7, 0x02, 0xb9, 0xa4, 
-        0xde, 0x6a, 0x32, 0x6d, 0xd8, 0x8a, 0x84, 0x72, 0x2a, 0x14, 0x9f, 0x88, 0xf9, 0xdc, 0x89, 0x9a, 
-        0xfb, 0x7c, 0x2e, 0xc3, 0x8f, 0xb8, 0x65, 0x48, 0x26, 0xc8, 0x12, 0x4a, 0xce, 0xe7, 0xd2, 0x62, 
-        0x0c, 0xe0, 0x1f, 0xef, 0x11, 0x75, 0x78, 0x71, 0xa5, 0x8e, 0x76, 0x3d, 0xbd, 0xbc, 0x86, 0x57, 
-        0x0b, 0x28, 0x2f, 0xa3, 0xda, 0xd4, 0xe4, 0x0f, 0xa9, 0x27, 0x53, 0x04, 0x1b, 0xfc, 0xac, 0xe6, 
-        0x7a, 0x07, 0xae, 0x63, 0xc5, 0xdb, 0xe2, 0xea, 0x94, 0x8b, 0xc4, 0xd5, 0x9d, 0xf8, 0x90, 0x6b, 
-        0xb1, 0x0d, 0xd6, 0xeb, 0xc6, 0x0e, 0xcf, 0xad, 0x08, 0x4e, 0xd7, 0xe3, 0x5d, 0x50, 0x1e, 0xb3, 
-        0x5b, 0x23, 0x38, 0x34, 0x68, 0x46, 0x03, 0x8c, 0xdd, 0x9c, 0x7d, 0xa0, 0xcd, 0x1a, 0x41, 0x1c
-      ];
+      // b の逆元を計算
+      const b_inv = this.inverse(b);
       
-      return gf256.mul(a, inverseTable[b]);
+      // a / b = a * (b^-1)
+      return this.mul(a, b_inv);
+    },
+    
+    // 逆元計算（拡張ユークリッドアルゴリズム）
+    inverse: function(a) {
+      if (a === 0) throw new Error('0の逆元は存在しません');
+      
+      // 拡張ユークリッドアルゴリズムによるGF(256)での逆元計算
+      let t = 0, newt = 1;
+      let r = 0x11b, newr = a; // 0x11b = x^8 + x^4 + x^3 + x + 1
+      
+      while (newr !== 0) {
+        const quotient = this.polyDiv(r, newr);
+        
+        [t, newt] = [newt, t ^ this.polyMul(quotient, newt)];
+        [r, newr] = [newr, r ^ this.polyMul(quotient, newr)];
+      }
+      
+      if (r > 1) {
+        throw new Error('多項式は可逆ではありません');
+      }
+      
+      return t;
+    },
+    
+    // 多項式除算（GF(2)上）- 逆元計算用
+    polyDiv: function(a, b) {
+      if (b === 0) throw new Error('0による多項式除算はできません');
+      
+      let result = 0;
+      let degree_diff = this.degree(a) - this.degree(b);
+      
+      if (degree_diff < 0) return 0;
+      
+      for (let i = degree_diff; i >= 0; i--) {
+        if (a & (1 << (i + this.degree(b)))) {
+          result |= 1 << i;
+          a ^= b << i;
+        }
+      }
+      
+      return result;
+    },
+    
+    // 多項式乗算（GF(2)上）- 逆元計算用
+    polyMul: function(a, b) {
+      let result = 0;
+      
+      while (a > 0) {
+        if (a & 1) {
+          result ^= b;
+        }
+        b <<= 1;
+        a >>= 1;
+      }
+      
+      return result;
+    },
+    
+    // 多項式の次数
+    degree: function(a) {
+      let degree = -1;
+      
+      for (let i = 0; i < 32; i++) {
+        if (a & (1 << i)) {
+          degree = i;
+        }
+      }
+      
+      return degree;
     }
   };
   
-  /**
-   * 多項式を評価する関数（修正版）
-   * @param {Array} coeffs - 多項式の係数
-   * @param {number} x - 評価するx値
-   * @returns {number} 評価結果
-   */
-  const evaluatePolynomial = (coeffs, x) => {
-    // x=0の場合は定数項を返す
-    if (x === 0) return coeffs[0];
+  
+  
+
+    /**
+     * 多項式を評価する関数（修正版）
+     * @param {Uint8Array|Array} coeffs - 多項式の係数（低次から高次）
+     * @param {number} x - 評価するx値
+     * @returns {number} 評価結果
+     */
+    function evaluatePolynomial(coeffs, x) {
+        if (x === 0) return coeffs[0];
+        
+        let result = 0;
+        // 係数を高次から低次の順に処理
+        for (let i = coeffs.length - 1; i >= 0; i--) {
+          result = GF256.add(GF256.mul(result, x), coeffs[i]);
+        }
+        return result;
+      }
     
-    let result = coeffs[0];
-    for (let i = 1; i < coeffs.length; i++) {
-      // mul(result, x) ^ coeffs[i]を明示的にgf256.add()を使用して表現
-      result = gf256.add(gf256.mul(result, x), coeffs[i]);
-    }
-    return result;
-  };
+
 
 /**
- * ラグランジュ補間法で多項式を復元（最適化）
+ * ラグランジュ補間法で多項式を復元（修正版）
  * @param {Array} points - (x, y)座標の配列
  * @returns {number} f(0)の値
  */
 const lagrangeInterpolation = (points) => {
-  const k = points.length;
-  let result = 0;
-  
-  // 各ポイントに対してラグランジュ係数を計算
-  for (let i = 0; i < k; i++) {
-    const [xi, yi] = points[i];
-    if (yi === 0) continue; // 最適化: yiが0なら項は0になる
+    console.log('ラグランジュ補間開始 - ポイント:', JSON.stringify(points));
     
-    // この項の分子と分母を計算
-    let numerator = 1;
-    let denominator = 1;
-    
-    for (let j = 0; j < k; j++) {
-      if (i === j) continue;
-      
-      const [xj] = points[j];
-      numerator = gf256.mul(numerator, xj);
-      denominator = gf256.mul(denominator, xj ^ xi);
+    if (points.length === 0) {
+      throw new Error('ポイントが必要です');
     }
     
-    // 係数を計算してf(0)に加算
-    const term = gf256.mul(yi, gf256.div(numerator, denominator));
-    result ^= term;
-  }
+    // f(0)を求める
+    let result = 0;
+    
+    for (let i = 0; i < points.length; i++) {
+      const [xi, yi] = points[i];
+      console.log(`ポイント[${i}]: (${xi}, ${yi})`);
+      
+      // このポイントのラグランジュ基底多項式の値を計算
+      let basis = 1;
+      
+      for (let j = 0; j < points.length; j++) {
+        if (i === j) continue;
+        
+        const [xj] = points[j];
+        
+        // 分子: (0 - xj) = xj (GF(256)では -xj = xj)
+        const num = xj;
+        
+        // 分母: (xi - xj)
+        const denom = GF256.sub(xi, xj);
+        
+        if (denom === 0) {
+          throw new Error(`重複するx座標: xi=${xi}, xj=${xj}`);
+        }
+        
+        // 除算
+        const term = GF256.div(num, denom);
+        console.log(`  j=${j}: xj=${xj}, 分子=${num}, 分母=${denom}, 項=${term}`);
+        
+        // 基底多項式に掛ける
+        basis = GF256.mul(basis, term);
+      }
+      
+      console.log(`  基底多項式 L_${i}(0) = ${basis}`);
+      
+      // yi * Li(0)
+      const term = GF256.mul(yi, basis);
+      console.log(`  項の寄与: ${yi} * ${basis} = ${term}`);
+      
+      // 累積結果に加算
+      result = GF256.add(result, term);
+      console.log(`  現在の結果: ${result}`);
+    }
+    
+    console.log(`最終結果: ${result}`);
+    return result;
+  };
   
-  return result;
-}
 
 /**
  * バイト配列を16進数文字列に変換
@@ -404,10 +495,10 @@ const lagrangeInterpolation = (points) => {
  * @returns {string} 16進数文字列
  */
 const bytesToHex = (bytes) => {
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-};
+    return Array.from(bytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  };
 
 
 /**
@@ -418,135 +509,172 @@ const bytesToHex = (bytes) => {
  * @returns {Array} シェアの配列
  */
 export const createShares = (secret, totalShares, threshold) => {
-    try {
-      // 入力検証
-      if (threshold < 2) {
-        throw new Error('しきい値は2以上である必要があります');
-      }
-      if (totalShares < threshold) {
-        throw new Error('総シェア数はしきい値以上である必要があります');
-      }
-  
-      // 秘密情報をバイト配列に変換
-      const secretBytes = new TextEncoder().encode(secret);
+  try {
+    // 入力検証
+    if (threshold < 2) {
+      throw new Error('しきい値は2以上である必要があります');
+    }
+    if (totalShares < threshold) {
+      throw new Error('総シェア数はしきい値以上である必要があります');
+    }
+    
+    // 秘密情報をバイト配列に変換
+    const secretBytes = new TextEncoder().encode(secret);
+    console.log('秘密のバイト配列:', Array.from(secretBytes));
+    
+    // エンコーディング情報の保存（復元時に必要）
+    const encoding = 'utf-8';
+    
+    // シェアのリスト
+    const shares = [];
+    
+    // バイトごとに処理
+    for (let byteIndex = 0; byteIndex < secretBytes.length; byteIndex++) {
+      // 各バイトに対して多項式を作成
+      const coeffs = new Uint8Array(threshold);
       
-      // エンコーディング情報の保存（復元時に必要）
-      const encoding = 'utf-8';
+      // a_0はシークレットのバイト値
+      coeffs[0] = secretBytes[byteIndex];
       
-      // シェアのリスト
-      const shares = [];
+      // a_1からa_{t-1}は乱数
+      window.crypto.getRandomValues(coeffs.subarray(1));
       
-      // バイトごとに処理
-      for (let byteIndex = 0; byteIndex < secretBytes.length; byteIndex++) {
-        // 各バイトに対して多項式を作成
-        const coeffs = new Uint8Array(threshold);
+      console.log(`バイトインデックス ${byteIndex}, 元の値: ${secretBytes[byteIndex]}, 係数:`, Array.from(coeffs));
+      
+      // 各参加者にシェアを生成
+      for (let x = 1; x <= totalShares; x++) {
+        // インデックスは1から始まる
+        const y = evaluatePolynomial(coeffs, x);
+        console.log(`参加者 ${x}, バイト ${byteIndex}, 多項式結果: ${y}`);
         
-        // a_0はシークレットのバイト値
-        coeffs[0] = secretBytes[byteIndex];
-        
-        // a_1からa_{t-1}は乱数
-        window.crypto.getRandomValues(coeffs.subarray(1));
-        
-        // 各参加者にシェアを生成
-        for (let x = 1; x <= totalShares; x++) {
-          // インデックスは1から始まる
-          const y = evaluatePolynomial(coeffs, x);
-          
-          if (shares[x - 1] === undefined) {
-            shares[x - 1] = {
-              x,
-              y: [y]
-            };
-          } else {
-            shares[x - 1].y.push(y);
-          }
+        if (shares[x - 1] === undefined) {
+          shares[x - 1] = {
+            x,
+            y: [y]  // 通常の配列として保持
+          };
+        } else {
+          shares[x - 1].y.push(y);
         }
       }
-      
-      // シェアをエンコード
-      const encodedShares = shares.map(share => {
-        // xとyをエンコード
-        const xByte = String.fromCharCode(share.x);
-        const yHex = bytesToHex(new Uint8Array(share.y));
-        
-        // プレフィックス(80)を追加 - オリジナルライブラリとの互換性のため
-        return {
-          id: `share-${uuidv4()}`,
-          value: `80${share.x.toString(16).padStart(2, '0')}${yHex}`,
-          encoding // エンコーディング情報を追加
-        };
-      });
-      
-      return encodedShares;
-    } catch (error) {
-      console.error('シェア作成に失敗しました:', error);
-      throw new Error('シェア作成に失敗しました: ' + error.message);
     }
-  };
+    
+    // シェアをエンコード - 復元側と互換性のある形式に
+    const encodedShares = shares.map(share => {
+      // xは16進数で2桁にエンコード
+      const xHex = share.x.toString(16).padStart(2, '0');
+      
+      // yはUint8Arrayに変換してから16進数にエンコード
+      const yHex = bytesToHex(new Uint8Array(share.y));
+      console.log(`シェアID: share-${share.x}, X: ${xHex}, Y(Hex): ${yHex}`);
+      
+      // プレフィックス(80)を追加 - オリジナルライブラリとの互換性のため
+      return {
+        id: `share-${uuidv4()}`,
+        value: `80${xHex}${yHex}`,
+        encoding // エンコーディング情報を追加
+      };
+    });
+    
+    return encodedShares;
+  } catch (error) {
+    console.error('シェア作成に失敗しました:', error);
+    throw new Error('シェア作成に失敗しました: ' + error.message);
+  }
+};
   
-  /**
-   * シェアを結合して秘密を復元（修正版）
-   * @param {Array} shares - シェアの配列
-   * @returns {string} 復元された秘密情報
-   */
-  export const combineShares = (shares) => {
-    try {
-      // シェアの値だけを抽出
-      const shareValues = shares.map(share => share.value || share);
-      
-      // エンコーディング情報を取得（最初のシェアから）
-      const encoding = shares[0].encoding || 'utf-8';
-      
-      // シェアをデコード
-      const decodedShares = shareValues.map(shareValue => {
-        // 形式チェック
-        if (!shareValue.startsWith('80')) {
-          throw new Error('不正なシェア形式です');
-        }
-        
-        // xとyを抽出
-        const x = parseInt(shareValue.substring(2, 4), 16);
-        const yHex = shareValue.substring(4);
-        const yBytes = hexToBytes(yHex);
-        
-        return {
-          x,
-          y: Array.from(yBytes)
-        };
-      });
-      
-      // 秘密の長さは全てのシェアのy配列の長さと同じ
-      const secretLength = decodedShares[0].y.length;
-      
-      // 結果のバイト配列
-      const result = new Uint8Array(secretLength);
-      
-      // バイトごとに復元
-      for (let byteIndex = 0; byteIndex < secretLength; byteIndex++) {
-        // 各シェアから対応するバイトのポイントを収集
-        const points = decodedShares.map(share => [
-          share.x,
-          share.y[byteIndex]
-        ]);
-        
-        // ラグランジュ補間法でf(0)を求める
-        result[byteIndex] = lagrangeInterpolation(points);
+
+/**
+ * シェアを結合して秘密を復元（修正版）
+ * @param {Array} shares - シェアの配列
+ * @returns {string} 復元された秘密情報
+ */
+export const combineShares = (shares) => {
+  try {
+    // シェアの値だけを抽出
+    const shareValues = shares.map(share => share.value || share);
+    console.log('シェア値:', shareValues);
+    
+    // エンコーディング情報を取得（最初のシェアから）
+    const encoding = shares[0].encoding || 'utf-8';
+    console.log('使用するエンコーディング:', encoding);
+    
+    // シェアをデコード
+    const decodedShares = shareValues.map(shareValue => {
+      // 形式チェック
+      if (!shareValue.startsWith('80')) {
+        throw new Error('不正なシェア形式です');
       }
       
-      // バイト配列を文字列に変換（指定されたエンコーディングで）
-      return new TextDecoder(encoding).decode(result);
-    } catch (error) {
-      console.error('シェア結合に失敗しました:', error);
+      // xとyを抽出
+      const x = parseInt(shareValue.substring(2, 4), 16);
+      const yHex = shareValue.substring(4);
+      const yBytes = hexToBytes(yHex);
       
-      // デバッグ情報を追加
-      console.debug('シェアの数:', shares.length);
-      if (shares.length > 0) {
-        console.debug('最初のシェア:', shares[0]);
-      }
-      
-      throw new Error('シェア結合に失敗しました: ' + error.message);
+      return {
+        x,
+        y: Array.from(yBytes) // 一貫性のためにArray.fromを使用
+      };
+    });
+    
+    console.log('デコードされたシェア:', JSON.stringify(decodedShares));
+    
+    // シェアの有効性チェック
+    if (decodedShares.length === 0) {
+      throw new Error('有効なシェアがありません');
     }
-  };
+    
+    // 全シェアのyの長さが同じか確認
+    const yLengths = decodedShares.map(share => share.y.length);
+    const allSameLength = yLengths.every(length => length === yLengths[0]);
+    if (!allSameLength) {
+      throw new Error('シェアのバイト長が一致しません');
+    }
+    
+    // 秘密の長さは全てのシェアのy配列の長さと同じ
+    const secretLength = decodedShares[0].y.length;
+    
+    // 結果のバイト配列
+    const result = new Uint8Array(secretLength);
+    console.log('初期化された結果バイト配列:', result);
+    
+    // バイトごとに復元
+    for (let byteIndex = 0; byteIndex < secretLength; byteIndex++) {
+      // 各シェアから対応するバイトのポイントを収集
+      const points = decodedShares.map(share => [
+        share.x,
+        share.y[byteIndex]
+      ]);
+      
+      // ポイントをログ
+      console.log(`バイト ${byteIndex}, ポイント:`, JSON.stringify(points));
+      
+      // ラグランジュ補間法でf(0)を求める
+      result[byteIndex] = lagrangeInterpolation(points);
+      
+      // 結果をログ
+      console.log(`バイト ${byteIndex}, 補間結果: ${result[byteIndex]}`);
+    }
+    
+    // 復元されたバイト配列をログ出力
+    console.log('復元されたバイト配列:', Array.from(result).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    
+    try {
+      // バイト配列を文字列に変換
+      const decoded = new TextDecoder(encoding).decode(result);
+      console.log('デコード結果:', decoded);
+      return decoded;
+    } catch (decodeError) {
+      console.error('TextDecoderでのデコードに失敗:', decodeError);
+      
+      // エラーとともに16進数表現も添えて再スロー
+      const hexString = Array.from(result).map(b => b.toString(16).padStart(2, '0')).join('');
+      throw new Error(`デコードに失敗しました: ${decodeError.message}。データ(16進数): ${hexString}`);
+    }
+  } catch (error) {
+    console.error('シェア結合に失敗しました:', error);
+    throw new Error('シェア結合に失敗しました: ' + error.message);
+  }
+};
 /**
  * パスワードから暗号化キーを派生（PBKDF2）- バックアップ実装付き
  * @param {string} password - ユーザーパスワード
@@ -693,7 +821,7 @@ const fallbackEncryptDecrypt = (data, key, iv) => {
 export const storeEncryptionKeySecurely = async (masterKey, password) => {
     try {
       // パスワードからキーを派生
-      const { derivedKey, salt, key, isWebCrypto } = await deriveKeyFromPassword(password);
+      const { derivedKey, salt, key, iterations, hash } = await deriveKeyFromPassword(password);
       
       console.debug('生成されたソルト:', bytesToHex(salt));
       // Web Crypto APIが利用可能かどうかで処理を分岐
@@ -754,12 +882,14 @@ export const storeEncryptionKeySecurely = async (masterKey, password) => {
     const secureData = {
         encryptedKey: encryptedKeyHex,
         iv: ivHex,
-        salt: bytesToHex(salt), // 正しくHex形式でソルトを保存
+        salt: salt,
         version: 2,
         algorithm: derivedKey ? 'AES-GCM' : 'XOR-FALLBACK',
-        iterations: derivedKey ? 100000 : 1000,
+        iterations: iterations,
+        hash: hash,
         createdAt: new Date().toISOString(),
-        keyEncoding: 'utf8'
+        keyEncoding: 'utf8',
+        keyFormat: typeof masterKey === 'string' ? 'string' : 'binary'
       };
     
       console.debug('保存するセキュアデータ:', secureData);
@@ -776,15 +906,21 @@ export const storeEncryptionKeySecurely = async (masterKey, password) => {
  * @param {string} hex - 16進数文字列
  * @returns {Uint8Array} バイト配列
  */
-const hexToBytes = (hex) => {
-  if (!hex || hex.length % 2 !== 0) {
-    return new Uint8Array(0);
-  }
-  
-  return new Uint8Array(
-    hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
-  );
-};
+export const hexToBytes = (hex) => {
+    if (!hex || typeof hex !== 'string' || hex.length % 2 !== 0) {
+      console.error('Invalid hex string:', hex);
+      return new Uint8Array(0);
+    }
+    
+    try {
+      return new Uint8Array(
+        hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
+      );
+    } catch (e) {
+      console.error('Error converting hex to bytes:', e);
+      return new Uint8Array(0);
+    }
+  };
 
 /**
  * 安全なストレージに保存（IndexedDBプライマリ、バックアプオプション付き）
@@ -955,10 +1091,10 @@ export const retrieveEncryptionKeySecurely = async (password) => {
       const secureData = await getFromSecureStorage('masterKey');
       
       if (!secureData) {
-        throw new Error('暗号化キーが見つかりません');
+        return null;
       }
       
-      console.debug('取得したセキュアデータ:', secureData);
+      console.log('取得したセキュアデータ:', secureData);
       
       // secureData.saltが存在するか確認
       if (!secureData.salt) {
@@ -977,8 +1113,11 @@ export const retrieveEncryptionKeySecurely = async (password) => {
       console.debug('変換後のソルト長:', saltBytes.length);
       
       // アルゴリズムとエンコーディングを確認
-      const algorithm = secureData.algorithm || 'AES-GCM';
-      const keyEncoding = secureData.keyEncoding || 'utf8';
+    // メタデータを確認
+        const algorithm = secureData.algorithm || 'AES-GCM';
+        const keyEncoding = secureData.keyEncoding || 'utf8';
+        const iterations = secureData.iterations || 100000;
+        const hash = secureData.hash || 'SHA-256';
       
       // Web Crypto APIが利用可能であれば使用
       if (algorithm === 'AES-GCM' && window.crypto && window.crypto.subtle) {
@@ -1033,7 +1172,7 @@ export const retrieveEncryptionKeySecurely = async (password) => {
       return new TextDecoder(keyEncoding).decode(decryptedBytes);
     } catch (error) {
       console.error('暗号化キーの取得に失敗しました:', error);
-      throw new Error('暗号化キーの取得に失敗しました - パスワードが正しくないか、キーが存在しません');
+      return null;
     }
 };
 
@@ -1047,6 +1186,8 @@ export const retrieveEncryptionKeySecurely = async (password) => {
 export const generateRecoveryData = (encryptionKey, totalGuardians, requiredShares) => {
   // シェアを作成
   const shares = createShares(encryptionKey, totalGuardians, requiredShares);
+  console.log('生成されたシェア数:', shares.length);
+  console.log('生成されたシェアのサンプル:', shares[0]); // 最初のシェアの内容を表示
   
   // 公開リカバリーデータ
   const publicRecoveryData = {
@@ -1057,6 +1198,7 @@ export const generateRecoveryData = (encryptionKey, totalGuardians, requiredShar
     algorithm: 'shamir-secret-sharing',
     library: 'custom-implementation'
   };
+  console.log('公開リカバリーデータ:', publicRecoveryData);
   
   // バイト配列に変換
   const publicDataBytes = new TextEncoder().encode(
@@ -1068,3 +1210,35 @@ export const generateRecoveryData = (encryptionKey, totalGuardians, requiredShar
     publicRecoveryData: publicDataBytes
   };
 };
+
+// テスト関数
+function testSimple() {
+    // 基本演算のテスト
+    console.log("--- GF(256)基本演算テスト ---");
+    console.log("加算: 3 + 7 =", GF256.add(3, 7));
+    console.log("乗算: 3 * 7 =", GF256.mul(3, 7));
+    console.log("除算: 21 / 7 =", GF256.div(21, 7));
+    
+    // 逆元テスト
+    console.log("\n--- 逆元テスト ---");
+    for (let i = 1; i <= 5; i++) {
+      const inv = GF256.inverse(i);
+      console.log(`${i}の逆元 = ${inv}, 検証: ${i} * ${inv} = ${GF256.mul(i, inv)}`);
+    }
+    
+    // シャミア分散法テスト
+    console.log("\n--- シャミア秘密分散テスト ---");
+    // シンプルな秘密（'A'のASCIIコード = 65）
+    const secret = "A";
+    // シェアを作成
+    const shares = createShares(secret, 5, 3);
+    console.log("作成されたシェア:", shares);
+    
+    // シェアから秘密を復元
+    const recovered = combineShares(shares.slice(0, 3));
+    console.log("復元された秘密:", recovered);
+    
+    return recovered === secret;
+  }
+
+  console.log("テスト結果:", testSimple() ? "成功" : "失敗");

@@ -13,7 +13,7 @@ function App() {
         <CryptoTester />
       </main>
       <footer>
-        <p>© 2025 セキュアアプリケーションデモ</p>
+        <p>セキュアアプリケーションデモ</p>
       </footer>
     </div>
   );
